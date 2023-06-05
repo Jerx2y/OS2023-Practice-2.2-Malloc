@@ -28,6 +28,8 @@
 #define calloc mm_calloc
 #endif /* def DRIVER */
 
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
 
@@ -40,6 +42,7 @@
 
 #define WSIZE 4
 #define DSIZE 8
+#define CHUNKSIZE (1 << 7)
 
 #define PACK(size, alloc) ((size) | (alloc))
 #define GET(p) (*(unsigned int*)(p))
@@ -64,7 +67,6 @@
 #define SET_SUCC_VAL(p, val) PUT(GET_SUCC_PTR(p), val)
 
 static char *free_listp;
-
 
 void *find_fit(size_t size) {
     char *ptr = free_listp + GET_SUCC_VAL(free_listp);
@@ -117,31 +119,52 @@ void place(void *ptr, size_t size) {
     }
 }
 
-void coalesce(void *ptr) {
+void *coalesce(void *ptr) {
     void *pre = PREV_BLPR(ptr);  
     void *next = NEXT_BLPR(ptr);
     size_t size;
 
-    if (GET_ALLOC(HDPR(pre)) && GET_ALLOC(HDPR(next)))
+    if (GET_ALLOC(HDPR(pre)) && GET_ALLOC(HDPR(next))) {
         add_list(ptr);
-    else if (GET_ALLOC(HDPR(pre)) && (!GET_ALLOC(HDPR(next)))) {
+        return ptr;
+    } else if (GET_ALLOC(HDPR(pre)) && (!GET_ALLOC(HDPR(next)))) {
         remove_list(next);
         size = GET_SIZE(HDPR(ptr)) + GET_SIZE(HDPR(next));
         PUT(HDPR(ptr), PACK(size, 0));
         PUT(FTPR(ptr), PACK(size, 0));
         add_list(ptr);
+        return ptr;
     } else if ((!GET_ALLOC(HDPR(pre))) && GET_ALLOC(HDPR(next))) {
         size = GET_SIZE(HDPR(ptr)) + GET_SIZE(HDPR(pre));
         PUT(HDPR(pre), PACK(size, 0));
         PUT(FTPR(pre), PACK(size, 0));
+        return pre;
     } else {
         remove_list(next);
         size = GET_SIZE(HDPR(ptr)) + GET_SIZE(HDPR(pre)) + GET_SIZE(HDPR(next));
         PUT(HDPR(pre), PACK(size, 0));
         PUT(FTPR(pre), PACK(size, 0)); 
+        return pre;
     }   
 
 }
+
+void *extend_heap(size_t words)
+{
+    char *ptr;
+    size_t size;
+    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
+
+    if((long)(ptr = mem_sbrk(size)) == -1)
+        return NULL;
+    
+    PUT(HDPR(ptr), PACK(size, 0));
+    PUT(FTPR(ptr), PACK(size, 0));
+    PUT(HDPR(NEXT_BLPR(ptr)), PACK(0, 1));
+
+    return coalesce(ptr);
+}
+
 
 int mm_init(void) { 
 
@@ -152,6 +175,9 @@ int mm_init(void) {
     PUT(free_listp + WSIZE, PACK(ALIGNMENT, 1));
     PUT(free_listp + 2 * WSIZE, PACK(ALIGNMENT, 1));
     PUT(free_listp + 3 * WSIZE, PACK(ALIGNMENT, 1));
+
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+        return -1;
 
     return 0;
 }
@@ -165,13 +191,8 @@ void *malloc(size_t size) {
     ptr = find_fit(newsize);
     
     if (ptr == NULL) {
-        if ((ptr = mem_sbrk(newsize)) == (void *)-1) 
-            return NULL;
-        PUT(ptr + newsize - WSIZE, 1);
-        PUT(HDPR(ptr), PACK(newsize, 0));
-        PUT(FTPR(ptr), PACK(newsize, 0));
-        
-        add_list(ptr);
+        size_t extendsize = MAX(newsize, CHUNKSIZE);
+        ptr = extend_heap(extendsize / WSIZE);
     }
 
     place(ptr, newsize);
