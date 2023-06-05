@@ -9,7 +9,7 @@ OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o driverlib.o
 all: mdriver
 
 mdriver: $(OBJS)
-	$(CC) $(CFLAGS) -o mdriver $(OBJS)
+	$(CC) $(CFLAGS) -o code $(OBJS)
 
 mdriver.o: mdriver.c fsecs.h fcyc.h clock.h memlib.h config.h mm.h driverlib.h
 memlib.o: memlib.c memlib.h
